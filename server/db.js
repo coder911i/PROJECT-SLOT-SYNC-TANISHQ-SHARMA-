@@ -1,46 +1,51 @@
-const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const Database = require('better-sqlite3');
+const db = new Database(path.join(__dirname, 'slotsync.db'));
 
-const db = new sqlite3.Database(path.join(__dirname, 'slotsync.db'));
+// Create candidates table with all required columns
+db.exec(`
+  CREATE TABLE IF NOT EXISTS candidates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    candidateName TEXT NOT NULL,
+    candidateEmail TEXT NOT NULL,
+    phone TEXT,
+    position TEXT,
+    experience TEXT,
+    availability TEXT,
+    preferredDate1 TEXT,
+    preferredDate2 TEXT,
+    preferredDate3 TEXT,
+    preferredTime TEXT,
+    interviewMode TEXT,
+    location TEXT,
+    linkedin TEXT,
+    notes TEXT,
+    skills TEXT,
+    score TEXT,
+    status TEXT DEFAULT 'pending',
+    meetingLink TEXT,
+    interviewDate TEXT,
+    interviewTime TEXT,
+    submittedAt TEXT DEFAULT CURRENT_TIMESTAMP,
+    confirmedAt TEXT
+  )
+`);
 
-db.serialize(() => {
-  db.run(`CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, candidate_name TEXT, candidate_availability TEXT, status TEXT DEFAULT 'pending', created_at INTEGER DEFAULT (strftime('%s','now')))`);
-  db.run(`CREATE TABLE IF NOT EXISTS interviewers (id TEXT PRIMARY KEY, session_id TEXT, name TEXT, availability TEXT, FOREIGN KEY (session_id) REFERENCES sessions(id))`);
-  db.run(`CREATE TABLE IF NOT EXISTS results (id TEXT PRIMARY KEY, session_id TEXT UNIQUE, slots_json TEXT, conflicts_json TEXT, created_at INTEGER DEFAULT (strftime('%s','now')), FOREIGN KEY (session_id) REFERENCES sessions(id))`);
-  db.run(`CREATE TABLE IF NOT EXISTS candidates (id TEXT PRIMARY KEY, name TEXT, email TEXT, phone TEXT, position TEXT, experience TEXT, preferred_date_1 TEXT, preferred_date_2 TEXT, preferred_time TEXT, interview_mode TEXT, location TEXT, screening_score INTEGER, screening_status TEXT, screening_summary TEXT, created_at INTEGER DEFAULT (strftime('%s','now')))`);
-  db.run(`CREATE TABLE IF NOT EXISTS confirmed_interviews (id TEXT PRIMARY KEY, session_id TEXT, candidate_name TEXT, candidate_email TEXT, day_name TEXT, date_label TEXT, start_time TEXT, end_time TEXT, interviewers_json TEXT, status TEXT DEFAULT 'scheduled', created_at INTEGER DEFAULT (strftime('%s','now')))`);
-});
-
-// Helper methods for sqlite3
-const dbWrapper = {
-  prepare(sql) {
-    return {
-      run(...params) {
-        return new Promise((resolve, reject) => {
-          db.run(sql, params, function(err) {
-            if (err) reject(err);
-            else resolve({ lastID: this.lastID, changes: this.changes });
-          });
-        });
-      },
-      get(...params) {
-        return new Promise((resolve, reject) => {
-          db.get(sql, params, (err, row) => {
-            if (err) reject(err);
-            else resolve(row);
-          });
-        });
-      },
-      all(...params) {
-        return new Promise((resolve, reject) => {
-          db.all(sql, params, (err, rows) => {
-            if (err) reject(err);
-            else resolve(rows);
-          });
-        });
-      }
-    };
+// Helper to add columns safely if table exists
+const addColumnIfNotExists = (col, type) => {
+  try {
+    db.exec(`ALTER TABLE candidates ADD COLUMN ${col} ${type}`);
+  } catch(e) {
+    // Column already exists
   }
 };
 
-module.exports = dbWrapper;
+// Add new columns to existing table
+addColumnIfNotExists('meetingLink', 'TEXT');
+addColumnIfNotExists('interviewDate', 'TEXT');
+addColumnIfNotExists('interviewTime', 'TEXT');
+addColumnIfNotExists('confirmedAt', 'TEXT');
+addColumnIfNotExists('skills', 'TEXT');
+addColumnIfNotExists('score', 'TEXT');
+
+module.exports = db;

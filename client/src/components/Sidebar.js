@@ -2,9 +2,9 @@ export default function Sidebar({ screen, setScreen }) {
   const navItems = [
     { id: 'input', label: 'Input', icon: '✦' },
     { id: 'results', label: 'Results', icon: '✦' },
-    { id: 'history', label: 'History', icon: '🕐' },
+    { id: 'candidates', label: 'Candidates', icon: '�' },
+    { id: 'history', label: 'History', icon: '�' },
     { id: 'analytics', label: 'Analytics', icon: '📈' },
-    { id: 'automations', label: 'Automations', icon: '⚡' },
   ];
 
   return (

@@ -7,7 +7,7 @@ import EmptyScreen from './components/EmptyScreen';
 import LoadingScreen from './components/LoadingScreen';
 import HistoryScreen from './components/HistoryScreen';
 import AnalyticsScreen from './components/AnalyticsScreen';
-import AutomationsScreen from './components/AutomationsScreen';
+import CandidatesScreen from './CandidatesScreen';
 import './App.css';
 
 export default function App() {
@@ -33,7 +33,7 @@ export default function App() {
           {screen === 'empty' && <EmptyScreen result={schedulerResult} setScreen={setScreen} />}
           {screen === 'history' && <HistoryScreen setScreen={setScreen} onLoadResult={handleResult} />}
           {screen === 'analytics' && <AnalyticsScreen />}
-          {screen === 'automations' && <AutomationsScreen />}
+          {screen === 'candidates' && <CandidatesScreen />}
         </main>
       </div>
     </div>

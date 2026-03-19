@@ -31,7 +31,7 @@ services:
     staticPublishPath: build
     envVars:
       - key: REACT_APP_API_URL
-        value: https://slotsync-api.onrender.com/api
+        value: https://slotsync.onrender.com/api
     routes:
       - type: rewrite
         source: /*

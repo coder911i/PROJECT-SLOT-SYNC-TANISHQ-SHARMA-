@@ -46,80 +46,90 @@ function fireWebhook(url, payload) {
 // ─────────────────────────────────────
 // ROUTE 1: POST /api/schedule
 // ─────────────────────────────────────
-app.post('/api/schedule', (req, res) => {
-  const { candidateName, candidateAvailability, interviewers } = req.body;
+app.post('/api/schedule', async (req, res) => {
+  try {
+    const { candidateName, candidateAvailability, interviewers } = req.body;
 
-  if (!candidateAvailability || !interviewers || !interviewers.length) {
-    return res.status(400).json({ error: 'Missing candidateAvailability or interviewers' });
-  }
+    if (!candidateAvailability || !interviewers || !interviewers.length) {
+      return res.status(400).json({ error: 'Missing candidateAvailability or interviewers' });
+    }
 
-  const sessionId = uuidv4();
+    const sessionId = uuidv4();
 
-  db.prepare(`
-    INSERT INTO sessions (id, candidate_name, candidate_availability, status)
-    VALUES (?, ?, ?, 'processing')
-  `).run(sessionId, candidateName || 'Candidate', candidateAvailability);
+    await db.prepare(`
+      INSERT INTO sessions (id, candidate_name, candidate_availability, status)
+      VALUES (?, ?, ?, 'processing')
+    `).run(sessionId, candidateName || 'Candidate', candidateAvailability);
 
-  interviewers.forEach(iv => {
-    db.prepare(`
-      INSERT INTO interviewers (id, session_id, name, availability)
+    for (const iv of interviewers) {
+      await db.prepare(`
+        INSERT INTO interviewers (id, session_id, name, availability)
+        VALUES (?, ?, ?, ?)
+      `).run(uuidv4(), sessionId, iv.name, iv.availability);
+    }
+
+    const result = findBestSlots(candidateAvailability, interviewers);
+
+    await db.prepare(`
+      INSERT INTO results (id, session_id, slots_json, conflicts_json)
       VALUES (?, ?, ?, ?)
-    `).run(uuidv4(), sessionId, iv.name, iv.availability);
-  });
+    `).run(uuidv4(), sessionId, JSON.stringify(result.slots), JSON.stringify(result.conflictReport));
 
-  const result = findBestSlots(candidateAvailability, interviewers);
+    await db.prepare(`UPDATE sessions SET status = 'completed' WHERE id = ?`).run(sessionId);
 
-  db.prepare(`
-    INSERT INTO results (id, session_id, slots_json, conflicts_json)
-    VALUES (?, ?, ?, ?)
-  `).run(uuidv4(), sessionId, JSON.stringify(result.slots), JSON.stringify(result.conflictReport));
-
-  db.prepare(`UPDATE sessions SET status = 'completed' WHERE id = ?`).run(sessionId);
-
-  res.json({ sessionId, result });
+    res.json({ sessionId, result });
+  } catch (err) {
+    console.error('Schedule error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // ─────────────────────────────────────
 // ROUTE 2: POST /api/schedule/confirm
 // ─────────────────────────────────────
-app.post('/api/schedule/confirm', (req, res) => {
-  const { sessionId, selectedSlot, candidateName, candidateEmail } = req.body;
+app.post('/api/schedule/confirm', async (req, res) => {
+  try {
+    const { sessionId, selectedSlot, candidateName, candidateEmail } = req.body;
 
-  if (!sessionId || !selectedSlot || !candidateName || !candidateEmail) {
-    return res.status(400).json({ error: 'Missing required fields' });
+    if (!sessionId || !selectedSlot || !candidateName || !candidateEmail) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const interviewers = await db.prepare(`SELECT * FROM interviewers WHERE session_id = ?`).all(sessionId);
+    const panelNames = interviewers.map(i => i.name).join(', ');
+    const interviewId = uuidv4();
+
+    await db.prepare(`
+      INSERT INTO confirmed_interviews
+      (id, session_id, candidate_name, candidate_email, day_name, date_label, start_time, end_time, interviewers_json, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled')
+    `).run(
+      interviewId, sessionId, candidateName, candidateEmail,
+      selectedSlot.dayName, selectedSlot.dateLabel,
+      selectedSlot.startTime, selectedSlot.endTime,
+      JSON.stringify(interviewers)
+    );
+
+    await db.prepare(`UPDATE sessions SET status = 'confirmed' WHERE id = ?`).run(sessionId);
+
+    // Zap 2A — candidate email
+    fireWebhook(process.env.ZAPIER_CONFIRMED_CANDIDATE, {
+      candidateEmail,
+      subject: `Your interview is confirmed — ${selectedSlot.dateLabel} at ${selectedSlot.startTime}`,
+      body: `Hi ${candidateName},\n\nYour interview has been confirmed!\n\n📅 Date: ${selectedSlot.dateLabel}\n⏰ Time: ${selectedSlot.startTime} – ${selectedSlot.endTime}\n👥 Panel: ${panelNames}\n\nBe ready 5 minutes early.\n\n— SlotSync` 
+    });
+
+    // Zap 2B — manager email
+    fireWebhook(process.env.ZAPIER_CONFIRMED_MANAGER, {
+      subject: `Interview Scheduled: ${candidateName} — ${selectedSlot.dateLabel}`,
+      body: `Interview auto-scheduled by SlotSync.\n\nCandidate: ${candidateName} (${candidateEmail})\nDate: ${selectedSlot.dateLabel}\nTime: ${selectedSlot.startTime} – ${selectedSlot.endTime}\nPanel: ${panelNames}\n\nNo action required.\n\n— SlotSync` 
+    });
+
+    res.json({ success: true, interviewId });
+  } catch (err) {
+    console.error('Confirm error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
-
-  const interviewers = db.prepare(`SELECT * FROM interviewers WHERE session_id = ?`).all(sessionId);
-  const panelNames = interviewers.map(i => i.name).join(', ');
-  const interviewId = uuidv4();
-
-  db.prepare(`
-    INSERT INTO confirmed_interviews
-    (id, session_id, candidate_name, candidate_email, day_name, date_label, start_time, end_time, interviewers_json, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled')
-  `).run(
-    interviewId, sessionId, candidateName, candidateEmail,
-    selectedSlot.dayName, selectedSlot.dateLabel,
-    selectedSlot.startTime, selectedSlot.endTime,
-    JSON.stringify(interviewers)
-  );
-
-  db.prepare(`UPDATE sessions SET status = 'confirmed' WHERE id = ?`).run(sessionId);
-
-  // Zap 2A — candidate email
-  fireWebhook(process.env.ZAPIER_CONFIRMED_CANDIDATE, {
-    candidateEmail,
-    subject: `Your interview is confirmed — ${selectedSlot.dateLabel} at ${selectedSlot.startTime}`,
-    body: `Hi ${candidateName},\n\nYour interview has been confirmed!\n\n📅 Date: ${selectedSlot.dateLabel}\n⏰ Time: ${selectedSlot.startTime} – ${selectedSlot.endTime}\n👥 Panel: ${panelNames}\n\nBe ready 5 minutes early.\n\n— SlotSync` 
-  });
-
-  // Zap 2B — manager email
-  fireWebhook(process.env.ZAPIER_CONFIRMED_MANAGER, {
-    subject: `Interview Scheduled: ${candidateName} — ${selectedSlot.dateLabel}`,
-    body: `Interview auto-scheduled by SlotSync.\n\nCandidate: ${candidateName} (${candidateEmail})\nDate: ${selectedSlot.dateLabel}\nTime: ${selectedSlot.startTime} – ${selectedSlot.endTime}\nPanel: ${panelNames}\n\nNo action required.\n\n— SlotSync` 
-  });
-
-  res.json({ success: true, interviewId });
 });
 
 // ─────────────────────────────────────
@@ -346,7 +356,7 @@ cron.schedule('0 8 * * *', async () => {
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const todayLabel = `${days[today.getDay()]}, ${String(today.getDate()).padStart(2,'0')} ${months[today.getMonth()]}`;
 
-  const interviews = db.prepare(`
+  const interviews = await db.prepare(`
     SELECT * FROM confirmed_interviews
     WHERE date_label = ? AND status = 'scheduled'
   `).all(todayLabel);

@@ -3,7 +3,7 @@ services:
     name: slotsync-api
     runtime: node
     rootDir: server
-    buildCommand: npm install && npm rebuild sqlite3 --build-from-source
+    buildCommand: npm install
     startCommand: node index.js
     envVars:
       - key: PORT
@@ -15,12 +15,6 @@ services:
       - key: GMAIL_USER
         sync: false
       - key: GMAIL_APP_PASSWORD
-        sync: false
-      - key: ZAPIER_SCREENING_EMAIL_WEBHOOK
-        sync: false
-      - key: ZAPIER_CONFIRMED_CANDIDATE
-        sync: false
-      - key: ZAPIER_CONFIRMED_MANAGER
         sync: false
 
   - type: web

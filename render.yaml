@@ -3,7 +3,7 @@ services:
     name: slotsync-api
     runtime: node
     rootDir: server
-    buildCommand: npm install
+    buildCommand: npm install && npm rebuild sqlite3 --build-from-source
     startCommand: node index.js
     envVars:
       - key: PORT

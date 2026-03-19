@@ -1,134 +1,379 @@
 import { useState, useEffect } from 'react';
-import { getSessions, deleteSession } from '../api';
+
+const API = process.env.REACT_APP_API_URL || 'http://localhost:4000/api';
 
 export default function HistoryScreen({ setScreen, onLoadResult }) {
-  const [sessions, setSessions] = useState([]);
+  const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('all');
+  const [toast, setToast] = useState('');
+
+  const showToast = (message) => {
+    setToast(message);
+    setTimeout(() => setToast(''), 3000);
+  };
 
   useEffect(() => {
-    loadSessions();
+    loadHistory();
   }, []);
 
-  const loadSessions = async () => {
+  const loadHistory = async () => {
     setLoading(true);
     try {
-      const data = await getSessions();
-      setSessions(data);
+      const res = await fetch(`${API}/history`);
+      const data = await res.json();
+      setHistory(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error('Failed to load sessions:', err);
+      console.error('Failed to load history:', err);
     }
     setLoading(false);
   };
 
-  const handleDelete = async (id) => {
-    try {
-      await deleteSession(id);
-      loadSessions();
-    } catch (err) {
-      console.error('Failed to delete:', err);
-    }
+  const exportCSV = () => {
+    const headers = [
+      'Name', 'Email', 'Phone', 'Position', 'Experience',
+      'Status', 'Interview Date', 'Interview Time', 'Meeting Link',
+      'Submitted Date', 'Skills', 'Score'
+    ];
+    
+    const csvContent = [
+      headers.join(','),
+      ...history.map(item => [
+        `"${item.candidateName || ''}"`,
+        `"${item.candidateEmail || ''}"`,
+        `"${item.phone || ''}"`,
+        `"${item.position || ''}"`,
+        `"${item.experience || ''}"`,
+        `"${item.status || ''}"`,
+        `"${item.interviewDate || ''}"`,
+        `"${item.interviewTime || ''}"`,
+        `"${item.meetingLink || ''}"`,
+        `"${new Date(item.submittedAt).toLocaleDateString()}"`,
+        `"${item.skills || ''}"`,
+        `"${item.score || ''}"`
+      ].join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `candidates-history-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+    showToast('History exported successfully');
   };
 
-  const handleView = (session) => {
-    onLoadResult({
-      slots: session.slots || [],
-      conflictReport: session.conflictReport
-    }, session.id);
-  };
-
-  const formatDate = (timestamp) => {
-    const date = new Date(timestamp * 1000);
-    return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-  };
+  const filteredHistory = history.filter(item => {
+    if (filter === 'all') return true;
+    return item.status === filter;
+  });
 
   const getStatusColor = (status) => {
-    if (status === 'confirmed') return '#00E5A0';
-    if (status === 'completed') return '#6C63FF';
-    return '#8B8FA8';
+    if (status === 'confirmed') return '#10b981';
+    if (status === 'rejected') return '#ef4444';
+    return '#9ca3af';
   };
 
   if (loading) {
     return (
-      <div style={{ maxWidth: '760px', margin: '0 auto', animation: 'fadeIn 0.3s ease' }}>
-        <h1 style={{ fontSize: '32px', fontWeight: 900, color: '#fff', marginBottom: '24px' }}>History</h1>
-        {[1, 2, 3].map(i => (
-          <div key={i} style={{
-            background: '#1A1D27', borderRadius: '16px', padding: '20px 24px',
-            marginBottom: '12px', opacity: 0.5,
-            animation: 'pulse 2s ease-in-out infinite'
-          }}>
-            <div style={{ height: '20px', background: '#2A2D3E', borderRadius: '4px', width: '60%', marginBottom: '8px' }} />
-            <div style={{ height: '14px', background: '#2A2D3E', borderRadius: '4px', width: '40%' }} />
-          </div>
-        ))}
-        <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }`}</style>
-      </div>
-    );
-  }
-
-  if (sessions.length === 0) {
-    return (
-      <div style={{ maxWidth: '760px', margin: '0 auto', textAlign: 'center', animation: 'fadeIn 0.3s ease' }}>
-        <div style={{ fontSize: '64px', marginBottom: '16px' }}>📅</div>
-        <h2 style={{ fontSize: '24px', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>No sessions yet</h2>
-        <p style={{ color: '#8B8FA8', marginBottom: '24px' }}>Create your first interview scheduling session</p>
-        <button onClick={() => setScreen('input')} style={{
-          padding: '12px 24px', borderRadius: '999px', border: 'none',
-          background: 'linear-gradient(135deg, #6C63FF, #8B87FF)', color: '#fff',
-          fontSize: '14px', fontWeight: 700, cursor: 'pointer'
+      <div style={{ padding: '24px', color: '#fff', minHeight: '100vh' }}>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          marginBottom: '32px'
         }}>
-          Create your first one →
-        </button>
-        <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+          <div>
+            <h1 style={{ 
+              fontSize: '28px', 
+              fontWeight: 700, 
+              marginBottom: '8px' 
+            }}>
+              History
+            </h1>
+            <p style={{ 
+              color: '#9ca3af', 
+              fontSize: '16px' 
+            }}>
+              View confirmed and rejected candidates
+            </p>
+          </div>
+        </div>
+        <div style={{ 
+          display: 'grid', 
+          gap: '16px' 
+        }}>
+          {[1, 2, 3, 4].map(i => (
+            <div key={i} style={{
+              background: '#1f2937',
+              borderRadius: '12px',
+              padding: '20px',
+              border: '1px solid #374151',
+              animation: 'pulse 2s ease-in-out infinite'
+            }}>
+              <div style={{ 
+                height: '16px', 
+                background: '#374151', 
+                borderRadius: '4px', 
+                width: '40%', 
+                marginBottom: '12px' 
+              }} />
+              <div style={{ 
+                height: '12px', 
+                background: '#374151', 
+                borderRadius: '4px', 
+                width: '60%', 
+                marginBottom: '8px' 
+              }} />
+              <div style={{ 
+                height: '12px', 
+                background: '#374151', 
+                borderRadius: '4px', 
+                width: '50%' 
+              }} />
+            </div>
+          ))}
+        </div>
+        <style>{`
+          @keyframes pulse { 
+            0%, 100% { opacity: 0.5; } 
+            50% { opacity: 0.8; } 
+          }
+        `}</style>
       </div>
     );
   }
 
   return (
-    <div style={{ maxWidth: '760px', margin: '0 auto', animation: 'fadeIn 0.3s ease' }}>
-      <h1 style={{ fontSize: '32px', fontWeight: 900, color: '#fff', marginBottom: '24px' }}>History</h1>
-      
-      {sessions.map(session => (
-        <div key={session.id} style={{
-          background: '#1A1D27', borderRadius: '16px', padding: '20px 24px',
-          marginBottom: '12px', display: 'flex', alignItems: 'center',
-          justifyContent: 'space-between', border: '1px solid rgba(255,255,255,0.04)'
+    <div style={{ padding: '24px', color: '#fff', minHeight: '100vh' }}>
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          top: 20, right: 20,
+          background: '#10b981',
+          color: '#fff',
+          padding: '12px 20px',
+          borderRadius: '8px',
+          zIndex: 1000,
+          fontWeight: 500
         }}>
-          <div>
-            <div style={{ fontSize: '16px', fontWeight: 700, color: '#fff', marginBottom: '4px' }}>
-              {session.candidate_name || 'Candidate'}
-            </div>
-            <div style={{ fontSize: '13px', color: '#8B8FA8' }}>
-              {formatDate(session.created_at)} • {(session.slots || []).length} slots found
-            </div>
+          {toast}
+        </div>
+      )}
+
+      {/* Page Header */}
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        marginBottom: '32px'
+      }}>
+        <div>
+          <h1 style={{ 
+            fontSize: '28px', 
+            fontWeight: 700, 
+            marginBottom: '8px' 
+          }}>
+            History
+          </h1>
+          <p style={{ 
+            color: '#9ca3af', 
+            fontSize: '16px' 
+          }}>
+            View confirmed and rejected candidates
+          </p>
+        </div>
+        <button
+          onClick={exportCSV}
+          style={{
+            padding: '10px 20px',
+            background: '#6c63ff',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontSize: '14px',
+            fontWeight: 600
+          }}
+        >
+          Export CSV
+        </button>
+      </div>
+
+      {/* Filter Tabs */}
+      <div style={{ 
+        display: 'flex', 
+        gap: '8px', 
+        marginBottom: '24px',
+        borderBottom: '1px solid #374151'
+      }}>
+        {[
+          { id: 'all', label: 'All' },
+          { id: 'confirmed', label: 'Confirmed' },
+          { id: 'rejected', label: 'Rejected' }
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setFilter(tab.id)}
+            style={{
+              padding: '12px 24px',
+              background: 'transparent',
+              border: 'none',
+              color: filter === tab.id ? '#fff' : '#9ca3af',
+              borderBottom: filter === tab.id ? '2px solid #6c63ff' : '2px solid transparent',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: filter === tab.id ? 600 : 400,
+              transition: 'all 0.2s'
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* History List */}
+      {filteredHistory.length === 0 ? (
+        <div style={{
+          textAlign: 'center',
+          padding: '60px',
+          background: '#1f2937',
+          borderRadius: '12px',
+          border: '1px solid #374151'
+        }}>
+          <div style={{ 
+            fontSize: '48px', 
+            marginBottom: '16px' 
+          }}>
+            📋
           </div>
-          
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{
-              padding: '4px 12px', borderRadius: '999px', fontSize: '12px', fontWeight: 600,
-              background: 'rgba(255,255,255,0.08)', color: getStatusColor(session.status)
-            }}>
-              {session.status}
-            </span>
-            <button onClick={() => handleView(session)} style={{
-              padding: '8px 16px', borderRadius: '8px', border: 'none',
-              background: '#6C63FF', color: '#fff', fontSize: '13px', fontWeight: 600,
-              cursor: 'pointer'
-            }}>
-              View
-            </button>
-            <button onClick={() => handleDelete(session.id)} style={{
-              padding: '8px', borderRadius: '8px', border: 'none',
-              background: 'transparent', color: '#8B8FA8', fontSize: '16px',
-              cursor: 'pointer'
-            }}>
-              ✕
-            </button>
+          <div style={{ 
+            fontSize: '18px', 
+            marginBottom: '8px',
+            color: '#fff'
+          }}>
+            No history yet
+          </div>
+          <div style={{ 
+            fontSize: '14px',
+            color: '#9ca3af'
+          }}>
+            {filter === 'all' 
+              ? 'No candidates have been confirmed or rejected yet'
+              : `No ${filter} candidates yet`
+            }
           </div>
         </div>
-      ))}
+      ) : (
+        <div style={{ 
+          display: 'grid', 
+          gap: '16px' 
+        }}>
+          {filteredHistory.map(item => (
+            <div key={item.id} style={{
+              background: '#1f2937',
+              borderRadius: '12px',
+              padding: '20px',
+              border: '1px solid #374151',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start'
+            }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-between',
+                  alignItems: 'flex-start',
+                  marginBottom: '12px'
+                }}>
+                  <div>
+                    <div style={{ 
+                      fontSize: '18px', 
+                      fontWeight: 600,
+                      marginBottom: '4px',
+                      color: '#fff'
+                    }}>
+                      {item.candidateName}
+                    </div>
+                    <div style={{ 
+                      color: '#9ca3af', 
+                      fontSize: '14px',
+                      marginBottom: '2px'
+                    }}>
+                      {item.candidateEmail}
+                    </div>
+                    <div style={{ 
+                      color: '#9ca3af', 
+                      fontSize: '14px',
+                      marginBottom: '8px'
+                    }}>
+                      {item.position}
+                    </div>
+                  </div>
+                  <span style={{
+                    background: getStatusColor(item.status) + '22',
+                    color: getStatusColor(item.status),
+                    padding: '4px 12px',
+                    borderRadius: '20px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    textTransform: 'capitalize',
+                    border: `1px solid ${getStatusColor(item.status)}44`
+                  }}>
+                    {item.status}
+                  </span>
+                </div>
 
-      <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+                {item.status === 'confirmed' && (item.interviewDate || item.interviewTime) && (
+                  <div style={{
+                    background: '#10b98122',
+                    borderRadius: '8px',
+                    padding: '12px',
+                    marginBottom: '12px',
+                    border: '1px solid #10b98144'
+                  }}>
+                    <div style={{ 
+                      fontSize: '14px',
+                      color: '#fff',
+                      marginBottom: '4px'
+                    }}>
+                      <strong>Interview:</strong> {item.interviewDate} at {item.interviewTime}
+                    </div>
+                    {item.meetingLink && (
+                      <div>
+                        <a 
+                          href={item.meetingLink}
+                          style={{ 
+                            color: '#6c63ff',
+                            textDecoration: 'none',
+                            fontSize: '14px'
+                          }}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Join Meeting →
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div style={{ 
+                  display: 'flex', 
+                  gap: '16px',
+                  fontSize: '13px',
+                  color: '#9ca3af'
+                }}>
+                  <span>Submitted: {new Date(item.submittedAt).toLocaleDateString()}</span>
+                  {item.skills && <span>Skills: {item.skills}</span>}
+                  {item.score && <span>Score: {item.score}</span>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

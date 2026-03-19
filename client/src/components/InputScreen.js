@@ -1,226 +1,484 @@
-import { useState } from 'react';
-import { scheduleInterview } from '../api';
+import { useState, useEffect } from 'react';
 
-const AVATAR_COLORS = ['#6C63FF', '#00E5A0', '#FF6B35', '#3B82F6', '#EC4899'];
-
-const DEFAULT_INTERVIEWERS = [
-  { id: 1, name: 'Arjun', availability: 'Tue 3–6 PM, Wed 2–5 PM' },
-  { id: 2, name: 'Priya', availability: 'Tue 1–4 PM, Thu 3–5 PM' },
-  { id: 3, name: 'Dev', availability: 'Wed 10 AM–1 PM, Fri 11 AM–2 PM' },
-];
+const API = process.env.REACT_APP_API_URL || 'http://localhost:4000/api';
 
 export default function InputScreen({ setScreen, onResult }) {
-  const [tab, setTab] = useState('candidate');
-  const [candidateName, setCandidateName] = useState('');
-  const [candidateAvail, setCandidateAvail] = useState('Tue–Thu 2–5 PM, Fri 9 AM–12 PM');
-  const [interviewers, setInterviewers] = useState(DEFAULT_INTERVIEWERS);
-  const [focusedTextarea, setFocusedTextarea] = useState(null);
-  const [error, setError] = useState('');
-
-  const addInterviewer = () => {
-    if (interviewers.length >= 5) return;
-    setInterviewers([...interviewers, { id: Date.now(), name: '', availability: '' }]);
-  };
-
-  const removeInterviewer = (id) => setInterviewers(interviewers.filter(i => i.id !== id));
-
-  const updateInterviewer = (id, field, value) => {
-    setInterviewers(interviewers.map(i => i.id === id ? { ...i, [field]: value } : i));
-  };
-
-  const handleFindSlots = async () => {
-    setError('');
-    const hasCandidate = candidateAvail.trim();
-    const hasInterviewers = interviewers.some(i => i.name && i.availability);
-    if (!hasCandidate || !hasInterviewers) {
-      setError('Please fill in candidate availability and at least one interviewer');
-      return;
-    }
-    
-    setScreen('loading');
-    try {
-      const data = await scheduleInterview(candidateName, candidateAvail, interviewers);
-      onResult(data.result, data.sessionId);
-    } catch (err) {
-      setScreen('input');
-      setError('Failed to schedule. Please try again.');
-    }
-  };
-
-  const textareaStyle = (id) => ({
-    width: '100%', padding: '12px 14px', borderRadius: '10px', border: `1.5px solid ${focusedTextarea === id ? '#6C63FF' : '#e5e7eb'}`,
-    background: '#F8F9FF', color: '#1A1D27', fontSize: '14px', resize: 'vertical',
-    minHeight: '80px', outline: 'none', fontFamily: 'Inter, sans-serif',
-    boxShadow: focusedTextarea === id ? '0 0 0 3px rgba(108,99,255,0.1)' : 'none',
-    transition: 'all 0.2s'
+  const [mainTab, setMainTab] = useState('add');
+  const [roleTab, setRoleTab] = useState('candidate');
+  const [loading, setLoading] = useState(false);
+  const [toast, setToast] = useState('');
+  const [availability, setAvailability] = useState([]);
+  const [form, setForm] = useState({
+    fullName: '',
+    email: '',
+    availableDate: '',
+    startTime: '',
+    endTime: ''
   });
 
-  return (
-    <div style={{ display: 'flex', gap: '60px', alignItems: 'center', minHeight: 'calc(100vh - 136px)', animation: 'fadeIn 0.3s ease' }}>
+  const showToast = (message) => {
+    setToast(message);
+    setTimeout(() => setToast(''), 3000);
+  };
+
+  const fetchAvailability = async () => {
+    try {
+      const res = await fetch(`${API}/availability`);
+      const data = await res.json();
+      setAvailability(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Fetch availability error:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (mainTab === 'view') {
+      fetchAvailability();
+    }
+  }, [mainTab]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!form.fullName || !form.email || !form.availableDate || !form.startTime || !form.endTime) {
+      showToast('Please fill all fields');
+      return;
+    }
+
+    if (form.startTime >= form.endTime) {
+      showToast('End time must be after start time');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/availability`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          personName: form.fullName,
+          personEmail: form.email,
+          role: roleTab,
+          availableDate: form.availableDate,
+          startTime: form.startTime,
+          endTime: form.endTime
+        })
+      });
+
+      if (res.ok) {
+        showToast('Availability added successfully!');
+        setForm({
+          fullName: '',
+          email: '',
+          availableDate: '',
+          startTime: '',
+          endTime: ''
+        });
+        setMainTab('view');
+        fetchAvailability();
+      } else {
+        showToast('Failed to add availability');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Error adding availability');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Delete this availability?')) return;
+    
+    try {
+      const res = await fetch(`${API}/availability/${id}`, {
+        method: 'DELETE'
+      });
       
-      {/* Left panel */}
-      <div style={{ flex: '0 0 38%', position: 'relative' }}>
-        <div style={{
-          position: 'absolute', width: '300px', height: '300px', borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(108,99,255,0.3), rgba(0,229,160,0.2))',
-          filter: 'blur(80px)', top: '-60px', left: '-40px', zIndex: 0, pointerEvents: 'none'
-        }} />
-        <div style={{ position: 'relative', zIndex: 1 }}>
-          <div style={{ fontSize: '13px', color: '#6C63FF', fontWeight: 600, letterSpacing: '1px', marginBottom: '12px' }}>AI SCHEDULER</div>
-          <h1 style={{ fontSize: '52px', fontWeight: 900, color: '#fff', lineHeight: 1.1, marginBottom: '16px' }}>
-            Who's<br />available?
-          </h1>
-          <p style={{ fontSize: '16px', color: '#8B8FA8', lineHeight: 1.6, maxWidth: '320px' }}>
-            Drop in availability. We'll find the perfect slot in seconds.
-          </p>
-          <div style={{ marginTop: '32px', display: 'flex', gap: '12px' }}>
-            {['Fast', 'Smart', 'Conflict-free'].map(tag => (
-              <span key={tag} style={{
-                padding: '6px 14px', borderRadius: '999px', fontSize: '12px', fontWeight: 600,
-                background: 'rgba(108,99,255,0.12)', color: '#c4c0ff', border: '1px solid rgba(108,99,255,0.2)'
-              }}>{tag}</span>
-            ))}
-          </div>
-        </div>
-      </div>
+      if (res.ok) {
+        showToast('Availability deleted');
+        fetchAvailability();
+      } else {
+        showToast('Failed to delete');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Error deleting');
+    }
+  };
 
-      {/* Right card */}
-      <div style={{
-        flex: 1, background: '#fff', borderRadius: '24px',
-        padding: '32px', boxShadow: '0 40px 80px rgba(0,0,0,0.4)'
-      }}>
-        
-        {/* Tabs */}
+  const inputStyle = {
+    padding: '10px 14px',
+    borderRadius: '8px',
+    border: '1px solid #374151',
+    background: '#111827',
+    color: '#ffffff',
+    fontSize: '14px',
+    width: '100%',
+    boxSizing: 'border-box',
+    colorScheme: 'dark',
+    cursor: 'pointer'
+  };
+
+  return (
+    <div style={{ padding: '24px', color: '#fff', minHeight: '100vh' }}>
+      {toast && (
         <div style={{
-          display: 'flex', background: '#F3F4F6', borderRadius: '999px',
-          padding: '4px', marginBottom: '28px'
+          position: 'fixed',
+          top: 20, right: 20,
+          background: '#10b981',
+          color: '#fff',
+          padding: '12px 20px',
+          borderRadius: '8px',
+          zIndex: 1000,
+          fontWeight: 500
         }}>
-          {['candidate', 'interviewers'].map(t => (
-            <button key={t} onClick={() => setTab(t)} style={{
-              flex: 1, padding: '8px 16px', borderRadius: '999px', border: 'none', cursor: 'pointer',
-              background: tab === t ? '#6C63FF' : 'transparent',
-              color: tab === t ? '#fff' : '#6B7280', fontWeight: 600, fontSize: '14px',
-              transition: 'all 0.2s', textTransform: 'capitalize'
-            }}>
-              {t === 'candidate' ? 'Candidate' : 'Interviewers'}
-            </button>
-          ))}
+          {toast}
         </div>
+      )}
 
-        {/* Candidate Tab */}
-        {tab === 'candidate' && (
-          <div>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151', display: 'block', marginBottom: '8px' }}>
-              Candidate Name
-            </label>
-            <input
-              value={candidateName}
-              onChange={e => setCandidateName(e.target.value)}
-              placeholder="e.g. Rahul Kumar"
-              style={{
-                width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1.5px solid #E5E7EB',
-                background: '#F8F9FF', fontSize: '14px', color: '#1A1D27',
-                outline: 'none', marginBottom: '16px', fontFamily: 'Inter, sans-serif',
-                boxShadow: 'none'
-              }}
-            />
-            <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151', display: 'block', marginBottom: '8px' }}>
-              Candidate Availability
-            </label>
-            <textarea
-              value={candidateAvail}
-              onChange={e => setCandidateAvail(e.target.value)}
-              onFocus={() => setFocusedTextarea('candidate')}
-              onBlur={() => setFocusedTextarea(null)}
-              placeholder="e.g. Tue–Thu 2–5 PM, Fri 9 AM–12 PM"
-              style={{ ...textareaStyle('candidate'), minHeight: '120px' }}
-            />
-            <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '8px' }}>
-              Use formats like "Mon–Wed 2–5 PM" or "Fri 9 AM–12 PM, 3–6 PM"
-            </p>
-          </div>
-        )}
-
-        {/* Interviewers Tab */}
-        {tab === 'interviewers' && (
-          <div>
-            {interviewers.map((interviewer, idx) => (
-              <div key={interviewer.id} style={{
-                display: 'flex', gap: '12px', marginBottom: '16px',
-                padding: '14px', background: '#F9FAFB', borderRadius: '12px', alignItems: 'flex-start'
-              }}>
-                <div style={{
-                  width: '36px', height: '36px', borderRadius: '50%', flexShrink: 0,
-                  background: AVATAR_COLORS[idx % AVATAR_COLORS.length],
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: '#fff', fontWeight: 700, fontSize: '13px', marginTop: '2px'
-                }}>
-                  {interviewer.name ? interviewer.name[0].toUpperCase() : (idx + 1)}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <input
-                    value={interviewer.name}
-                    onChange={e => updateInterviewer(interviewer.id, 'name', e.target.value)}
-                    placeholder="Interviewer name"
-                    style={{
-                      width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1.5px solid #E5E7EB',
-                      background: '#fff', fontSize: '13px', fontWeight: 600, color: '#1A1D27',
-                      outline: 'none', marginBottom: '8px', fontFamily: 'Inter, sans-serif'
-                    }}
-                  />
-                  <textarea
-                    value={interviewer.availability}
-                    onChange={e => updateInterviewer(interviewer.id, 'availability', e.target.value)}
-                    onFocus={() => setFocusedTextarea(interviewer.id)}
-                    onBlur={() => setFocusedTextarea(null)}
-                    placeholder="e.g. Tue 3–6 PM, Wed 2–5 PM"
-                    style={textareaStyle(interviewer.id)}
-                  />
-                </div>
-                <button onClick={() => removeInterviewer(interviewer.id)} style={{
-                  background: 'none', border: 'none', color: '#9CA3AF', cursor: 'pointer',
-                  fontSize: '18px', padding: '4px', borderRadius: '6px', flexShrink: 0,
-                  transition: 'color 0.2s'
-                }} onMouseOver={e => e.target.style.color = '#EF4444'}
-                   onMouseOut={e => e.target.style.color = '#9CA3AF'}>✕</button>
-              </div>
-            ))}
-
-            {interviewers.length < 5 && (
-              <button onClick={addInterviewer} style={{
-                width: '100%', padding: '10px', borderRadius: '10px', border: '1.5px dashed #D1D5DB',
-                background: 'transparent', color: '#6B7280', fontSize: '14px', fontWeight: 500,
-                cursor: 'pointer', transition: 'all 0.2s'
-              }}
-              onMouseOver={e => { e.target.style.borderColor = '#6C63FF'; e.target.style.color = '#6C63FF'; }}
-              onMouseOut={e => { e.target.style.borderColor = '#D1D5DB'; e.target.style.color = '#6B7280'; }}>
-                + Add Interviewer
-              </button>
-            )}
-          </div>
-        )}
-
-        {error && (
-          <div style={{ color: '#EF4444', fontSize: '13px', marginTop: '16px', textAlign: 'center' }}>
-            {error}
-          </div>
-        )}
-
-        {/* CTA Button */}
-        <button onClick={handleFindSlots} style={{
-          width: '100%', marginTop: '28px', padding: '16px', borderRadius: '999px', border: 'none',
-          background: 'linear-gradient(135deg, #6C63FF, #00E5A0)', color: '#fff',
-          fontSize: '16px', fontWeight: 700, cursor: 'pointer',
-          boxShadow: '0 8px 32px rgba(108,99,255,0.35)', transition: 'all 0.2s',
-          letterSpacing: '0.3px'
-        }}
-        onMouseOver={e => e.target.style.transform = 'translateY(-2px)'}
-        onMouseOut={e => e.target.style.transform = 'translateY(0)'}>
-          ✦ Find Best Slots →
-        </button>
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        marginBottom: '32px'
+      }}>
+        <div>
+          <h1 style={{ 
+            fontSize: '28px', 
+            fontWeight: 700, 
+            marginBottom: '8px' 
+          }}>
+            Availability Management
+          </h1>
+          <p style={{ 
+            color: '#9ca3af', 
+            fontSize: '16px' 
+          }}>
+            Add and view interview availability
+          </p>
+        </div>
       </div>
 
-      <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+      <div style={{ 
+        display: 'flex', 
+        gap: '8px', 
+        marginBottom: '24px',
+        borderBottom: '1px solid #374151'
+      }}>
+        {[
+          { id: 'add', label: 'Add My Availability' },
+          { id: 'view', label: 'View All Availability' }
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setMainTab(tab.id)}
+            style={{
+              padding: '12px 24px',
+              background: 'transparent',
+              border: 'none',
+              color: mainTab === tab.id ? '#fff' : '#9ca3af',
+              borderBottom: mainTab === tab.id ? '2px solid #6c63ff' : '2px solid transparent',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: mainTab === tab.id ? 600 : 400,
+              transition: 'all 0.2s'
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {mainTab === 'add' && (
+        <div>
+          <div style={{ 
+            display: 'flex', 
+            gap: '8px', 
+            marginBottom: '24px'
+          }}>
+            {[
+              { id: 'candidate', label: 'Candidate' },
+              { id: 'interviewer', label: 'Interviewer' }
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setRoleTab(tab.id)}
+                style={{
+                  padding: '8px 16px',
+                  background: roleTab === tab.id ? '#6c63ff' : '#1f2937',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: roleTab === tab.id ? 600 : 400,
+                  transition: 'all 0.2s'
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <form onSubmit={handleSubmit} style={{
+            background: '#1f2937',
+            borderRadius: '12px',
+            padding: '24px',
+            border: '1px solid #374151'
+          }}>
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+              gap: '16px',
+              marginBottom: '20px'
+            }}>
+              <div>
+                <label style={{ 
+                  display: 'block',
+                  marginBottom: '6px',
+                  fontSize: '13px',
+                  color: '#9ca3af',
+                  fontWeight: 500
+                }}>
+                  Full Name
+                </label>
+                <input
+                  type="text"
+                  placeholder="Enter your full name"
+                  value={form.fullName}
+                  onChange={e => setForm(prev => ({ ...prev, fullName: e.target.value }))}
+                  style={inputStyle}
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={{ 
+                  display: 'block',
+                  marginBottom: '6px',
+                  fontSize: '13px',
+                  color: '#9ca3af',
+                  fontWeight: 500
+                }}>
+                  Email Address
+                </label>
+                <input
+                  type="email"
+                  placeholder="your.email@example.com"
+                  value={form.email}
+                  onChange={e => setForm(prev => ({ ...prev, email: e.target.value }))}
+                  style={inputStyle}
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={{ 
+                  display: 'block',
+                  marginBottom: '6px',
+                  fontSize: '13px',
+                  color: '#9ca3af',
+                  fontWeight: 500
+                }}>
+                  Available Date
+                </label>
+                <input
+                  type="date"
+                  value={form.availableDate}
+                  onChange={e => setForm(prev => ({ ...prev, availableDate: e.target.value }))}
+                  style={inputStyle}
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={{ 
+                  display: 'block',
+                  marginBottom: '6px',
+                  fontSize: '13px',
+                  color: '#9ca3af',
+                  fontWeight: 500
+                }}>
+                  Start Time
+                </label>
+                <input
+                  type="time"
+                  value={form.startTime}
+                  onChange={e => setForm(prev => ({ ...prev, startTime: e.target.value }))}
+                  style={inputStyle}
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={{ 
+                  display: 'block',
+                  marginBottom: '6px',
+                  fontSize: '13px',
+                  color: '#9ca3af',
+                  fontWeight: 500
+                }}>
+                  End Time
+                </label>
+                <input
+                  type="time"
+                  value={form.endTime}
+                  onChange={e => setForm(prev => ({ ...prev, endTime: e.target.value }))}
+                  style={inputStyle}
+                  required
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              style={{
+                padding: '12px 24px',
+                background: loading ? '#4c4685' : '#6c63ff',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                fontSize: '15px',
+                fontWeight: 600,
+                transition: 'all 0.2s',
+                opacity: loading ? 0.7 : 1
+              }}
+            >
+              {loading ? 'Adding...' : 'Add Availability'}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {mainTab === 'view' && (
+        <div>
+          {availability.length === 0 ? (
+            <div style={{
+              textAlign: 'center',
+              padding: '60px',
+              background: '#1f2937',
+              borderRadius: '12px',
+              border: '1px solid #374151'
+            }}>
+              <div style={{ 
+                fontSize: '48px', 
+                marginBottom: '16px' 
+              }}>
+                📅
+              </div>
+              <div style={{ 
+                fontSize: '18px', 
+                marginBottom: '8px',
+                color: '#fff'
+              }}>
+                No availability yet
+              </div>
+              <div style={{ 
+                fontSize: '14px',
+                color: '#9ca3af',
+                marginBottom: '24px'
+              }}>
+                Add your availability to get started
+              </div>
+              <button
+                onClick={() => setMainTab('add')}
+                style={{
+                  padding: '10px 20px',
+                  background: '#6c63ff',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: 600
+                }}
+              >
+                Add Availability
+              </button>
+            </div>
+          ) : (
+            <div style={{ 
+              display: 'grid', 
+              gap: '16px' 
+            }}>
+              {availability.map(item => (
+                <div key={item.id} style={{
+                  background: '#1f2937',
+                  borderRadius: '12px',
+                  padding: '20px',
+                  border: '1px solid #374151',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ 
+                      fontSize: '18px', 
+                      fontWeight: 600,
+                      marginBottom: '8px',
+                      color: '#fff'
+                    }}>
+                      {item.personName}
+                    </div>
+                    <div style={{ 
+                      color: '#9ca3af', 
+                      fontSize: '14px',
+                      marginBottom: '4px'
+                    }}>
+                      {item.personEmail}
+                    </div>
+                    <div style={{ 
+                      display: 'flex',
+                      gap: '12px',
+                      alignItems: 'center',
+                      flexWrap: 'wrap'
+                    }}>
+                      <span style={{
+                        background: item.role === 'candidate' ? '#10b98122' : '#3b82f622',
+                        color: item.role === 'candidate' ? '#10b981' : '#3b82f6',
+                        padding: '4px 12px',
+                        borderRadius: '20px',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        textTransform: 'capitalize',
+                        border: `1px solid ${item.role === 'candidate' ? '#10b98144' : '#3b82f644'}`
+                      }}>
+                        {item.role}
+                      </span>
+                      <span style={{ color: '#9ca3af', fontSize: '14px' }}>
+                        {new Date(item.availableDate).toLocaleDateString()}
+                      </span>
+                      <span style={{ color: '#9ca3af', fontSize: '14px' }}>
+                        {item.startTime} - {item.endTime}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleDelete(item.id)}
+                    style={{
+                      padding: '8px',
+                      background: '#ef444422',
+                      color: '#ef4444',
+                      border: '1px solid #ef444444',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontSize: '16px',
+                      marginLeft: '16px',
+                      transition: 'all 0.2s'
+                    }}
+                    title="Delete"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

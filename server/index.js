@@ -8,6 +8,20 @@ const {
   sendReminderEmail
 } = require('./services/emailService');
 
+// Create availability table if not exists
+db.exec(`
+  CREATE TABLE IF NOT EXISTS availability (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    personName TEXT NOT NULL,
+    personEmail TEXT NOT NULL,
+    role TEXT NOT NULL,
+    availableDate TEXT NOT NULL,
+    startTime TEXT NOT NULL,
+    endTime TEXT NOT NULL,
+    createdAt TEXT DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
 const app = express();
 const PORT = process.env.PORT || 4000;
 
@@ -217,27 +231,83 @@ app.post('/api/schedule/confirm', async (req, res) => {
 // ROUTE 6 — Analytics:
 app.get('/api/analytics', (req, res) => {
   try {
-    const total = db.prepare(
+    const totalCandidates = db.prepare(
       'SELECT COUNT(*) as count FROM candidates'
     ).get().count;
 
-    const pending = db.prepare(
+    const pendingCount = db.prepare(
       `SELECT COUNT(*) as count 
        FROM candidates WHERE status='pending'`
     ).get().count;
 
-    const confirmed = db.prepare(
+    const confirmedCount = db.prepare(
       `SELECT COUNT(*) as count 
        FROM candidates WHERE status='confirmed'`
     ).get().count;
 
-    const rejected = db.prepare(
+    const rejectedCount = db.prepare(
       `SELECT COUNT(*) as count 
        FROM candidates WHERE status='rejected'`
     ).get().count;
 
+    const totalSessions = db.prepare(
+      'SELECT COUNT(*) as count FROM sessions'
+    ).get().count || 0;
+
+    const today = new Date().toISOString().split('T')[0];
+    const todayInterviews = db.prepare(
+      `SELECT COUNT(*) as count 
+       FROM candidates 
+       WHERE status='confirmed' AND interviewDate = ?`
+    ).get(today).count || 0;
+
+    const thisWeekStart = new Date();
+    thisWeekStart.setDate(thisWeekStart.getDate() - thisWeekStart.getDay());
+    const thisWeekEnd = new Date(thisWeekStart);
+    thisWeekEnd.setDate(thisWeekEnd.getDate() + 6);
+
+    const thisWeekInterviews = db.prepare(
+      `SELECT COUNT(*) as count 
+       FROM candidates 
+       WHERE status='confirmed' 
+       AND interviewDate >= ? 
+       AND interviewDate <= ?`
+    ).get(
+      thisWeekStart.toISOString().split('T')[0],
+      thisWeekEnd.toISOString().split('T')[0]
+    ).count || 0;
+
+    const confirmationRate = totalCandidates > 0 
+      ? Math.round((confirmedCount / totalCandidates) * 100) 
+      : 0;
+
+    const topPositions = db.prepare(`
+      SELECT position, COUNT(*) as count 
+      FROM candidates 
+      WHERE position IS NOT NULL AND position != ''
+      GROUP BY position 
+      ORDER BY count DESC 
+      LIMIT 5
+    `).all();
+
+    const recentActivity = db.prepare(`
+      SELECT candidateName, status, submittedAt
+      FROM candidates 
+      ORDER BY submittedAt DESC 
+      LIMIT 5
+    `).all();
+
     return res.json({ 
-      total, pending, confirmed, rejected 
+      totalCandidates,
+      pendingCount,
+      confirmedCount,
+      rejectedCount,
+      totalSessions,
+      todayInterviews,
+      thisWeekInterviews,
+      confirmationRate,
+      topPositions,
+      recentActivity
     });
   } catch (err) {
     console.error('Analytics error:', err.message);
@@ -278,6 +348,97 @@ app.get('/api/automations/daily-reminders',
     });
   } catch (err) {
     console.error('Reminder error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ROUTE 8 — History:
+app.get('/api/history', (req, res) => {
+  try {
+    const history = db.prepare(`
+      SELECT * FROM candidates 
+      WHERE status IN ('confirmed', 'rejected')
+      ORDER BY submittedAt DESC
+    `).all();
+    return res.json(history);
+  } catch (err) {
+    console.error('History error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ROUTE 9 — Get all availability:
+app.get('/api/availability', (req, res) => {
+  try {
+    const availability = db.prepare(`
+      SELECT * FROM availability 
+      ORDER BY availableDate ASC, startTime ASC
+    `).all();
+    return res.json(availability);
+  } catch (err) {
+    console.error('Get availability error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ROUTE 9 — Add availability:
+app.post('/api/availability', (req, res) => {
+  try {
+    const {
+      personName,
+      personEmail,
+      role,
+      availableDate,
+      startTime,
+      endTime
+    } = req.body;
+
+    if (!personName || !personEmail || !role || !availableDate || !startTime || !endTime) {
+      return res.status(400).json({ 
+        error: 'All fields are required'
+      });
+    }
+
+    const stmt = db.prepare(`
+      INSERT INTO availability (
+        personName, personEmail, role,
+        availableDate, startTime, endTime
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    const result = stmt.run(
+      personName, personEmail, role,
+      availableDate, startTime, endTime
+    );
+
+    return res.status(201).json({ 
+      success: true, 
+      id: result.lastInsertRowid
+    });
+
+  } catch (err) {
+    console.error('Add availability error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ROUTE 10 — Delete availability:
+app.delete('/api/availability/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = db.prepare(`
+      DELETE FROM availability WHERE id = ?
+    `).run(id);
+
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Availability not found' });
+    }
+
+    return res.json({ success: true });
+
+  } catch (err) {
+    console.error('Delete availability error:', err.message);
     return res.status(500).json({ error: err.message });
   }
 });

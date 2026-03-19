@@ -14,7 +14,9 @@ const app = express();
 app.use(cors({
   origin: [
     'http://localhost:3000',
-    'https://slotsync.vercel.app',
+    'https://slotsync-client.onrender.com',
+    'https://slotsync-api.onrender.com',
+    /\.onrender\.com$/,
     /\.vercel\.app$/
   ]
 }));
@@ -123,85 +125,108 @@ app.post('/api/schedule/confirm', (req, res) => {
 // ─────────────────────────────────────
 // ROUTE 3: GET /api/sessions
 // ─────────────────────────────────────
-app.get('/api/sessions', (req, res) => {
-  const sessions = db.prepare(`
-    SELECT s.id, s.candidate_name, s.status, s.created_at,
-           r.slots_json, r.conflicts_json
-    FROM sessions s
-    LEFT JOIN results r ON r.session_id = s.id
-    ORDER BY s.created_at DESC
-    LIMIT 50
-  `).all();
+app.get('/api/sessions', async (req, res) => {
+  try {
+    const sessions = await db.prepare(`
+      SELECT s.id, s.candidate_name, s.status, s.created_at,
+             r.slots_json, r.conflicts_json
+      FROM sessions s
+      LEFT JOIN results r ON r.session_id = s.id
+      ORDER BY s.created_at DESC
+      LIMIT 50
+    `).all();
 
-  const formatted = sessions.map(s => ({
-    ...s,
-    slots: s.slots_json ? JSON.parse(s.slots_json) : [],
-    conflictReport: s.conflicts_json ? JSON.parse(s.conflicts_json) : null,
-    interviewers: db.prepare(`SELECT name, availability FROM interviewers WHERE session_id = ?`).all(s.id)
-  }));
+    const formatted = await Promise.all(sessions.map(async s => {
+      const interviewers = await db.prepare(`SELECT name, availability FROM interviewers WHERE session_id = ?`).all(s.id);
+      return {
+        ...s,
+        slots: s.slots_json ? JSON.parse(s.slots_json) : [],
+        conflictReport: s.conflicts_json ? JSON.parse(s.conflicts_json) : null,
+        interviewers
+      };
+    }));
 
-  res.json(formatted);
+    res.json(formatted);
+  } catch (err) {
+    console.error('Get sessions error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // ─────────────────────────────────────
 // ROUTE 4: GET /api/sessions/:id
 // ─────────────────────────────────────
-app.get('/api/sessions/:id', (req, res) => {
-  const session = db.prepare(`SELECT * FROM sessions WHERE id = ?`).get(req.params.id);
-  if (!session) return res.status(404).json({ error: 'Session not found' });
+app.get('/api/sessions/:id', async (req, res) => {
+  try {
+    const session = await db.prepare(`SELECT * FROM sessions WHERE id = ?`).get(req.params.id);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
 
-  const result = db.prepare(`SELECT * FROM results WHERE session_id = ?`).get(req.params.id);
-  const interviewers = db.prepare(`SELECT * FROM interviewers WHERE session_id = ?`).all(req.params.id);
+    const result = await db.prepare(`SELECT * FROM results WHERE session_id = ?`).get(req.params.id);
+    const interviewers = await db.prepare(`SELECT * FROM interviewers WHERE session_id = ?`).all(req.params.id);
 
-  res.json({
-    ...session,
-    slots: result ? JSON.parse(result.slots_json) : [],
-    conflictReport: result ? JSON.parse(result.conflicts_json) : null,
-    interviewers
-  });
+    res.json({
+      ...session,
+      slots: result ? JSON.parse(result.slots_json) : [],
+      conflictReport: result ? JSON.parse(result.conflicts_json) : null,
+      interviewers
+    });
+  } catch (err) {
+    console.error('Get session error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // ─────────────────────────────────────
 // ROUTE 5: DELETE /api/sessions/:id
 // ─────────────────────────────────────
-app.delete('/api/sessions/:id', (req, res) => {
-  db.prepare(`DELETE FROM results WHERE session_id = ?`).run(req.params.id);
-  db.prepare(`DELETE FROM interviewers WHERE session_id = ?`).run(req.params.id);
-  db.prepare(`DELETE FROM sessions WHERE id = ?`).run(req.params.id);
-  res.json({ success: true });
+app.delete('/api/sessions/:id', async (req, res) => {
+  try {
+    await db.prepare(`DELETE FROM results WHERE session_id = ?`).run(req.params.id);
+    await db.prepare(`DELETE FROM interviewers WHERE session_id = ?`).run(req.params.id);
+    await db.prepare(`DELETE FROM sessions WHERE id = ?`).run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Delete error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // ─────────────────────────────────────
 // ROUTE 6: GET /api/analytics
 // ─────────────────────────────────────
-app.get('/api/analytics', (req, res) => {
-  const totalSessions = db.prepare(`SELECT COUNT(*) as c FROM sessions`).get().c;
-  const completedSessions = db.prepare(`SELECT COUNT(*) as c FROM sessions WHERE status = 'completed' OR status = 'confirmed'`).get().c;
-  const confirmedSessions = db.prepare(`SELECT COUNT(*) as c FROM sessions WHERE status = 'confirmed'`).get().c;
-  const totalCandidates = db.prepare(`SELECT COUNT(*) as c FROM candidates`).get().c;
+app.get('/api/analytics', async (req, res) => {
+  try {
+    const totalSessions = (await db.prepare(`SELECT COUNT(*) as c FROM sessions`).get()).c;
+    const completedSessions = (await db.prepare(`SELECT COUNT(*) as c FROM sessions WHERE status = 'completed' OR status = 'confirmed'`).get()).c;
+    const confirmedSessions = (await db.prepare(`SELECT COUNT(*) as c FROM sessions WHERE status = 'confirmed'`).get()).c;
+    const totalCandidates = (await db.prepare(`SELECT COUNT(*) as c FROM candidates`).get()).c;
 
-  const allResults = db.prepare(`SELECT slots_json FROM results`).all();
-  let totalSlots = 0, perfectMatches = 0, participationSum = 0, participationCount = 0;
+    const allResults = await db.prepare(`SELECT slots_json FROM results`).all();
+    let totalSlots = 0, perfectMatches = 0, participationSum = 0, participationCount = 0;
 
-  allResults.forEach(r => {
-    const slots = JSON.parse(r.slots_json);
-    totalSlots += slots.length;
-    slots.forEach(s => {
-      participationSum += s.participationPercent;
-      participationCount++;
-      if (s.participationPercent === 100) perfectMatches++;
+    allResults.forEach(r => {
+      const slots = JSON.parse(r.slots_json);
+      totalSlots += slots.length;
+      slots.forEach(s => {
+        participationSum += s.participationPercent;
+        participationCount++;
+        if (s.participationPercent === 100) perfectMatches++;
+      });
     });
-  });
 
-  res.json({
-    totalSessions,
-    completedSessions,
-    confirmedSessions,
-    totalCandidates,
-    totalSlots,
-    perfectMatches,
-    avgParticipation: participationCount > 0 ? Math.round(participationSum / participationCount) : 0
-  });
+    res.json({
+      totalSessions,
+      completedSessions,
+      confirmedSessions,
+      totalCandidates,
+      totalSlots,
+      perfectMatches,
+      avgParticipation: participationCount > 0 ? Math.round(participationSum / participationCount) : 0
+    });
+  } catch (err) {
+    console.error('Analytics error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // ─────────────────────────────────────
@@ -209,50 +234,55 @@ app.get('/api/analytics', (req, res) => {
 // Called by Zap 1A (Google Forms trigger)
 // Fires Zap 1B (screening email to manager)
 // ─────────────────────────────────────
-app.post('/api/webhooks/screen-candidate', (req, res) => {
-  const { candidateName, candidateEmail, availability, role, experience, skills } = req.body;
+app.post('/api/webhooks/screen-candidate', async (req, res) => {
+  try {
+    const { candidateName, candidateEmail, availability, role, experience, skills } = req.body;
 
-  if (!candidateName || !candidateEmail || !availability) {
-    return res.status(400).json({ error: 'Missing candidateName, candidateEmail, or availability' });
+    if (!candidateName || !candidateEmail || !availability) {
+      return res.status(400).json({ error: 'Missing candidateName, candidateEmail, or availability' });
+    }
+
+    const screening = screenCandidate({
+      candidateName,
+      candidateEmail,
+      role: role || 'Not specified',
+      experience: experience || '0',
+      skills: skills || '',
+      availability
+    });
+
+    const candidateId = uuidv4();
+
+    await db.prepare(`
+      INSERT INTO candidates
+      (id, name, email, role, experience, skills, availability, screening_score, screening_status, screening_summary)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      candidateId, candidateName, candidateEmail,
+      role, experience, skills, availability,
+      screening.score, screening.status, screening.summary
+    );
+
+    // Fire Zap 1B — sends email to manager
+    fireWebhook(process.env.ZAPIER_SCREENING_EMAIL_WEBHOOK, {
+      emailSubject: `[SlotSync] Candidate Screened: ${candidateName} — ${screening.status}`,
+      emailBody: screening.emailBody,
+      managerEmail: process.env.MANAGER_EMAIL || 'manager@yourcompany.com'
+    });
+
+    res.json({
+      candidateId,
+      candidateName,
+      candidateEmail,
+      role,
+      screening,
+      emailSubject: `[SlotSync] Candidate Screened: ${candidateName} — ${screening.status}`,
+      emailBody: screening.emailBody
+    });
+  } catch (err) {
+    console.error('Screen candidate error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
-
-  const screening = screenCandidate({
-    candidateName,
-    candidateEmail,
-    role: role || 'Not specified',
-    experience: experience || '0',
-    skills: skills || '',
-    availability
-  });
-
-  const candidateId = uuidv4();
-
-  db.prepare(`
-    INSERT INTO candidates
-    (id, name, email, role, experience, skills, availability, screening_score, screening_status, screening_summary)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    candidateId, candidateName, candidateEmail,
-    role, experience, skills, availability,
-    screening.score, screening.status, screening.summary
-  );
-
-  // Fire Zap 1B — sends email to manager
-  fireWebhook(process.env.ZAPIER_SCREENING_EMAIL_WEBHOOK, {
-    emailSubject: `[SlotSync] Candidate Screened: ${candidateName} — ${screening.status}`,
-    emailBody: screening.emailBody,
-    managerEmail: process.env.MANAGER_EMAIL || 'manager@yourcompany.com'
-  });
-
-  res.json({
-    candidateId,
-    candidateName,
-    candidateEmail,
-    role,
-    screening,
-    emailSubject: `[SlotSync] Candidate Screened: ${candidateName} — ${screening.status}`,
-    emailBody: screening.emailBody
-  });
 });
 
 // ─────────────────────────────────────
@@ -260,36 +290,41 @@ app.post('/api/webhooks/screen-candidate', (req, res) => {
 // Still available as endpoint for manual testing
 // Actual sending handled by node-cron below
 // ─────────────────────────────────────
-app.get('/api/automations/daily-reminders', (req, res) => {
-  const today = new Date();
-  const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const todayLabel = `${days[today.getDay()]}, ${String(today.getDate()).padStart(2,'0')} ${months[today.getMonth()]}`;
+app.get('/api/automations/daily-reminders', async (req, res) => {
+  try {
+    const today = new Date();
+    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const todayLabel = `${days[today.getDay()]}, ${String(today.getDate()).padStart(2,'0')} ${months[today.getMonth()]}`;
 
-  const todayInterviews = db.prepare(`
-    SELECT * FROM confirmed_interviews
-    WHERE date_label = ? AND status = 'scheduled'
-  `).all(todayLabel);
+    const todayInterviews = await db.prepare(`
+      SELECT * FROM confirmed_interviews
+      WHERE date_label = ? AND status = 'scheduled'
+    `).all(todayLabel);
 
-  if (!todayInterviews.length) {
-    return res.json({ hasInterviews: false, count: 0, date: todayLabel, interviews: [] });
+    if (!todayInterviews.length) {
+      return res.json({ hasInterviews: false, count: 0, date: todayLabel, interviews: [] });
+    }
+
+    const reminders = todayInterviews.map(iv => {
+      const interviewers = JSON.parse(iv.interviewers_json);
+      return {
+        interviewId: iv.id,
+        candidateName: iv.candidate_name,
+        candidateEmail: iv.candidate_email,
+        dateLabel: iv.date_label,
+        startTime: iv.start_time,
+        endTime: iv.end_time,
+        panelNames: interviewers.map(i => i.name).join(', '),
+        interviewers
+      };
+    });
+
+    res.json({ hasInterviews: true, count: reminders.length, date: todayLabel, interviews: reminders });
+  } catch (err) {
+    console.error('Daily reminders error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
-
-  const reminders = todayInterviews.map(iv => {
-    const interviewers = JSON.parse(iv.interviewers_json);
-    return {
-      interviewId: iv.id,
-      candidateName: iv.candidate_name,
-      candidateEmail: iv.candidate_email,
-      dateLabel: iv.date_label,
-      startTime: iv.start_time,
-      endTime: iv.end_time,
-      panelNames: interviewers.map(i => i.name).join(', '),
-      interviewers
-    };
-  });
-
-  res.json({ hasInterviews: true, count: reminders.length, date: todayLabel, interviews: reminders });
 });
 
 // ─────────────────────────────────────

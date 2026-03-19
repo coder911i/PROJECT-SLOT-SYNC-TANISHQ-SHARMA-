@@ -16,7 +16,9 @@ export default function AutomationsScreen() {
     localStorage.setItem('zapier_webhook_url', url);
   };
 
-  const BASE_URL = window.location.hostname === 'localhost' ? 'http://localhost:4000' : '';
+  const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:4000/api';
+  const SCREENING_WEBHOOK = `${API_BASE.replace('/api', '')}/api/webhooks/screen-candidate`;
+  const REMINDERS_ENDPOINT = `${API_BASE.replace('/api', '')}/api/automations/daily-reminders`;
 
   const automations = [
     {
@@ -26,7 +28,7 @@ export default function AutomationsScreen() {
       description: 'When a candidate fills your Google Form / Typeform, SlotSync auto-screens them and emails results to your hiring manager.',
       status: 'Active',
       statusColor: '#00E5A0',
-      url: `${BASE_URL}/api/webhooks/screen-candidate`,
+      url: SCREENING_WEBHOOK,
       borderColor: '#6C63FF',
       steps: [
         'Copy the webhook URL above',
@@ -63,7 +65,7 @@ export default function AutomationsScreen() {
       description: 'Every morning at 8 AM, everyone with an interview today gets an automatic reminder. Zero manual work.',
       status: 'Active',
       statusColor: '#00E5A0',
-      url: `${BASE_URL}/api/automations/daily-reminders`,
+      url: REMINDERS_ENDPOINT,
       borderColor: '#FF6B35',
       steps: [
         'Zapier: Trigger = Schedule → Every Day → 8:00 AM',

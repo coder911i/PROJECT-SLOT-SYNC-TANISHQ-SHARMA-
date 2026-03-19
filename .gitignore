@@ -1,7 +1,28 @@
+# Dependencies
 node_modules/
-*.db
+client/node_modules/
+server/node_modules/
+
+# Environment variables — NEVER commit these
 .env
+server/.env
+client/.env
+
+# Database file — Render creates this fresh on deploy
+server/slotsync.db
+
+# Build output
 build/
-dist/
+client/build/
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# Logs
 *.log
+npm-debug.log*
+
+# Editor
+.vscode/
+.idea/

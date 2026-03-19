@@ -89,7 +89,16 @@ app.post('/api/schedule', async (req, res) => {
 // ─────────────────────────────────────
 app.post('/api/schedule/confirm', async (req, res) => {
   try {
-    const { sessionId, selectedSlot, candidateName, candidateEmail } = req.body;
+    const {
+      sessionId,
+      selectedSlot,
+      candidateName,
+      candidateEmail,
+      candidatePhone,
+      position,
+      interviewMode,
+      meetingLink
+    } = req.body;
 
     if (!sessionId || !selectedSlot || !candidateName || !candidateEmail) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -112,18 +121,52 @@ app.post('/api/schedule/confirm', async (req, res) => {
 
     await db.prepare(`UPDATE sessions SET status = 'confirmed' WHERE id = ?`).run(sessionId);
 
-    // Zap 2A — candidate email
-    fireWebhook(process.env.ZAPIER_CONFIRMED_CANDIDATE, {
-      candidateEmail,
-      subject: `Your interview is confirmed — ${selectedSlot.dateLabel} at ${selectedSlot.startTime}`,
-      body: `Hi ${candidateName},\n\nYour interview has been confirmed!\n\n📅 Date: ${selectedSlot.dateLabel}\n⏰ Time: ${selectedSlot.startTime} – ${selectedSlot.endTime}\n👥 Panel: ${panelNames}\n\nBe ready 5 minutes early.\n\n— SlotSync` 
-    });
+    // ZAP 2: Send confirmation to candidate
+    if (process.env.ZAPIER_CONFIRMED_CANDIDATE) {
+      try {
+        await fetch(process.env.ZAPIER_CONFIRMED_CANDIDATE, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            candidate_name: candidateName,
+            candidate_email: candidateEmail,
+            candidate_phone: candidatePhone || '',
+            position: position || '',
+            interview_date: selectedSlot.dateLabel,
+            interview_time: `${selectedSlot.startTime} - ${selectedSlot.endTime}`,
+            interview_mode: interviewMode || 'Online',
+            meeting_link: meetingLink || ''
+          })
+        });
+        console.log('Zap 2: Candidate confirmation webhook fired');
+      } catch (err) {
+        console.error('Zap 2 failed:', err.message);
+      }
+    }
 
-    // Zap 2B — manager email
-    fireWebhook(process.env.ZAPIER_CONFIRMED_MANAGER, {
-      subject: `Interview Scheduled: ${candidateName} — ${selectedSlot.dateLabel}`,
-      body: `Interview auto-scheduled by SlotSync.\n\nCandidate: ${candidateName} (${candidateEmail})\nDate: ${selectedSlot.dateLabel}\nTime: ${selectedSlot.startTime} – ${selectedSlot.endTime}\nPanel: ${panelNames}\n\nNo action required.\n\n— SlotSync` 
-    });
+    // ZAP 3: Send notification to manager
+    if (process.env.ZAPIER_CONFIRMED_MANAGER) {
+      try {
+        await fetch(process.env.ZAPIER_CONFIRMED_MANAGER, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            candidate_name: candidateName,
+            candidate_email: candidateEmail,
+            candidate_phone: candidatePhone || '',
+            position: position || '',
+            interview_date: selectedSlot.dateLabel,
+            interview_time: `${selectedSlot.startTime} - ${selectedSlot.endTime}`,
+            interview_mode: interviewMode || 'Online',
+            meeting_link: meetingLink || '',
+            panel: panelNames
+          })
+        });
+        console.log('Zap 3: Manager notification webhook fired');
+      } catch (err) {
+        console.error('Zap 3 failed:', err.message);
+      }
+    }
 
     res.json({ success: true, interviewId });
   } catch (err) {
@@ -291,6 +334,61 @@ app.post('/api/webhooks/screen-candidate', async (req, res) => {
     });
   } catch (err) {
     console.error('Screen candidate error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─────────────────────────────────────
+// ZAP 1: POST /api/candidates/webhook
+// Receives candidate data from Google Forms via Zapier
+// Saves candidate to database
+// ─────────────────────────────────────
+app.post('/api/candidates/webhook', async (req, res) => {
+  try {
+    const {
+      candidate_name,
+      candidate_email,
+      phone,
+      position,
+      experience,
+      preferred_date_1,
+      preferred_date_2,
+      preferred_time,
+      interview_mode,
+      location,
+      submitted_at
+    } = req.body;
+
+    if (!candidate_name || !candidate_email) {
+      return res.status(400).json({ error: 'Missing candidate_name or candidate_email' });
+    }
+
+    const candidateId = uuidv4();
+
+    await db.prepare(`
+      INSERT INTO candidates
+      (id, name, email, phone, position, experience, preferred_date_1, preferred_date_2, preferred_time, interview_mode, location, screening_score, screening_status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      candidateId,
+      candidate_name,
+      candidate_email,
+      phone || '',
+      position || '',
+      experience || '',
+      preferred_date_1 || '',
+      preferred_date_2 || '',
+      preferred_time || '',
+      interview_mode || '',
+      location || '',
+      0,
+      'pending',
+      submitted_at ? new Date(submitted_at).getTime() / 1000 : Math.floor(Date.now() / 1000)
+    );
+
+    res.json({ success: true, candidate_id: candidateId });
+  } catch (err) {
+    console.error('Webhook candidate error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

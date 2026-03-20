@@ -15,6 +15,10 @@ export default function InputScreen({ setScreen, onResult }) {
     startTime: '',
     endTime: ''
   });
+  const [findSlotsForm, setFindSlotsForm] = useState({
+    candidateName: '',
+    candidateEmail: ''
+  });
 
   const showToast = (message) => {
     setToast(message);
@@ -67,6 +71,15 @@ export default function InputScreen({ setScreen, onResult }) {
 
       if (res.ok) {
         showToast('Availability added successfully!');
+        
+        // Update find slots form if this is a candidate
+        if (roleTab === 'candidate') {
+          setFindSlotsForm({
+            candidateName: form.fullName,
+            candidateEmail: form.email
+          });
+        }
+        
         setForm({
           fullName: '',
           email: '',
@@ -82,6 +95,45 @@ export default function InputScreen({ setScreen, onResult }) {
     } catch (err) {
       console.error(err);
       showToast('Error adding availability');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFindSlots = async () => {
+    if (!findSlotsForm.candidateName || !findSlotsForm.candidateEmail) {
+      showToast('Please add candidate availability first');
+      return;
+    }
+
+    setLoading(true);
+    setScreen('loading');
+    
+    try {
+      const res = await fetch(`${API}/slots/find`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          candidateEmail: findSlotsForm.candidateEmail
+        })
+      });
+
+      const data = await res.json();
+      
+      if (res.ok) {
+        onResult({
+          slots: data.slots || [],
+          candidateEmail: findSlotsForm.candidateEmail,
+          candidateName: findSlotsForm.candidateName
+        }, null);
+      } else {
+        setScreen('input');
+        showToast(data.error || 'Failed to find slots');
+      }
+    } catch (err) {
+      console.error(err);
+      setScreen('input');
+      showToast('Error finding slots');
     } finally {
       setLoading(false);
     }
@@ -225,7 +277,8 @@ export default function InputScreen({ setScreen, onResult }) {
             background: '#1f2937',
             borderRadius: '12px',
             padding: '24px',
-            border: '1px solid #374151'
+            border: '1px solid #374151',
+            marginBottom: '24px'
           }}>
             <div style={{ 
               display: 'grid', 
@@ -350,6 +403,52 @@ export default function InputScreen({ setScreen, onResult }) {
               {loading ? 'Adding...' : 'Add Availability'}
             </button>
           </form>
+
+          {/* Find Best Slots Section */}
+          {findSlotsForm.candidateName && (
+            <div style={{
+              background: '#1f2937',
+              borderRadius: '12px',
+              padding: '24px',
+              border: '1px solid #374151'
+            }}>
+              <h3 style={{ 
+                fontSize: '18px', 
+                fontWeight: 600,
+                marginBottom: '16px',
+                color: '#fff'
+              }}>
+                Find Best Slots
+              </h3>
+              <div style={{ 
+                marginBottom: '16px',
+                color: '#9ca3af',
+                fontSize: '14px'
+              }}>
+                Candidate: <strong>{findSlotsForm.candidateName}</strong>
+                <br />
+                Email: <strong>{findSlotsForm.candidateEmail}</strong>
+              </div>
+              <button
+                onClick={handleFindSlots}
+                disabled={loading}
+                style={{
+                  padding: '12px 24px',
+                  background: loading ? '#4c4685' : '#10b981',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  fontSize: '15px',
+                  fontWeight: 600,
+                  transition: 'all 0.2s',
+                  opacity: loading ? 0.7 : 1
+                }}
+              >
+                {loading ? 'Finding...' : 'Find Best Slots'}
+              </button>
+            </div>
+          )}
         </div>
       )}
 

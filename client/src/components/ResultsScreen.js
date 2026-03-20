@@ -1,192 +1,602 @@
 import { useState, useEffect } from 'react';
-import ConfirmModal from './ConfirmModal';
 
-const AVATAR_COLORS = ['#6C63FF', '#00E5A0', '#FF6B35', '#3B82F6', '#EC4899'];
-
-function ProgressBar({ percent }) {
-  const [width, setWidth] = useState(0);
-  useEffect(() => { setTimeout(() => setWidth(percent), 300); }, [percent]);
-  const color = percent === 100 ? '#00E5A0' : percent >= 80 ? '#6C63FF' : '#FF6B35';
-  return (
-    <div style={{ marginTop: '12px' }}>
-      <div style={{ height: '4px', background: 'rgba(255,255,255,0.08)', borderRadius: '999px', overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${width}%`, background: color, borderRadius: '999px', transition: 'width 1s ease 0.3s' }} />
-      </div>
-      <div style={{ textAlign: 'right', fontSize: '10px', color: '#8B8FA8', fontWeight: 600, letterSpacing: '0.5px', marginTop: '4px' }}>
-        {percent === 100 ? `${percent}% PANEL PARTICIPATION` : `${percent}% PANEL PARTICIPATION`}
-      </div>
-    </div>
-  );
-}
+const API = process.env.REACT_APP_API_URL || 'http://localhost:4000/api';
 
 export default function ResultsScreen({ result, sessionId, setScreen }) {
-  const [conflictOpen, setConflictOpen] = useState(false);
-  const [showModal, setShowModal] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [toast, setToast] = useState('');
+  const [modal, setModal] = useState(null);
+  const [confirmForm, setConfirmForm] = useState({
+    interviewDate: '',
+    interviewTime: '',
+    meetingLink: ''
+  });
 
-  if (!result || !result.slots) return null;
+  const showToast = (message) => {
+    setToast(message);
+    setTimeout(() => setToast(''), 3000);
+  };
 
-  const bestSlot = result.slots[0];
+  useEffect(() => {
+    // Auto-populate confirm form if we have slot data
+    if (result && result.slots && result.slots.length > 0) {
+      const firstSlot = result.slots[0];
+      setConfirmForm({
+        interviewDate: firstSlot.date || '',
+        interviewTime: firstSlot.startTime || '',
+        meetingLink: ''
+      });
+    }
+  }, [result]);
+
+  if (!result || !result.slots) {
+    return (
+      <div style={{ padding: '24px', color: '#fff', minHeight: '100vh' }}>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          marginBottom: '32px'
+        }}>
+          <div>
+            <h1 style={{ 
+              fontSize: '28px', 
+              fontWeight: 700, 
+              marginBottom: '8px' 
+            }}>
+              Best Slots
+            </h1>
+            <p style={{ 
+              color: '#9ca3af', 
+              fontSize: '16px' 
+            }}>
+              No slots found
+            </p>
+          </div>
+          <button
+            onClick={() => setScreen('input')}
+            style={{
+              padding: '10px 20px',
+              background: '#6c63ff',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: 600
+            }}
+          >
+            Back
+          </button>
+        </div>
+        
+        <div style={{
+          textAlign: 'center',
+          padding: '60px',
+          background: '#1f2937',
+          borderRadius: '12px',
+          border: '1px solid #374151'
+        }}>
+          <div style={{ 
+            fontSize: '48px', 
+            marginBottom: '16px' 
+          }}>
+            🔍
+          </div>
+          <div style={{ 
+            fontSize: '18px', 
+            marginBottom: '8px',
+            color: '#fff'
+          }}>
+            No matching slots found
+          </div>
+          <div style={{ 
+            fontSize: '14px',
+            color: '#9ca3af',
+            marginBottom: '24px'
+          }}>
+            Try adding more availability or checking different dates
+          </div>
+          <button
+            onClick={() => setScreen('input')}
+            style={{
+              padding: '10px 20px',
+              background: '#6c63ff',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: 600
+            }}
+          >
+            Add More Availability
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const getMatchQuality = (score) => {
+    if (score >= 90) return { text: 'Perfect Match', color: '#10b981' };
+    if (score >= 70) return { text: 'Good Match', color: '#f59e0b' };
+    return { text: 'Fair Match', color: '#f97316' };
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+  };
+
+  const formatTime = (timeString) => {
+    if (!timeString) return '';
+    const [hours, minutes] = timeString.split(':');
+    const hour = parseInt(hours);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
+    return `${displayHour}:${minutes || '00'} ${ampm}`;
+  };
+
+  const handleBookSlot = (slot) => {
+    setModal(slot);
+    setConfirmForm({
+      interviewDate: slot.date || '',
+      interviewTime: slot.startTime || '',
+      meetingLink: ''
+    });
+  };
+
+  const handleConfirmBooking = async () => {
+    if (!confirmForm.interviewDate || !confirmForm.interviewTime || !confirmForm.meetingLink) {
+      showToast('Please fill all fields');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/schedule/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          candidateId: modal.candidateId || 1, // This would come from the slot data
+          interviewDate: confirmForm.interviewDate,
+          interviewTime: confirmForm.interviewTime,
+          meetingLink: confirmForm.meetingLink
+        })
+      });
+
+      if (res.ok) {
+        showToast('Interview confirmed! Emails sent.');
+        setModal(null);
+        setScreen('candidates');
+      } else {
+        showToast('Failed to confirm booking');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Error confirming booking');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div style={{ maxWidth: '760px', margin: '0 auto', animation: 'fadeIn 0.3s ease' }}>
-
-      {/* Header */}
-      <div style={{ textAlign: 'center', marginBottom: '40px' }}>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginBottom: '12px' }}>
-          {['RK', 'RK'].map((init, i) => (
-            <div key={i} style={{
-              width: '28px', height: '28px', borderRadius: '50%',
-              background: 'linear-gradient(135deg, #00E5A0, #6C63FF)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: '#fff', fontSize: '10px', fontWeight: 700
-            }}>{init}</div>
-          ))}
+    <div style={{ padding: '24px', color: '#fff', minHeight: '100vh' }}>
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          top: 20, right: 20,
+          background: '#10b981',
+          color: '#fff',
+          padding: '12px 20px',
+          borderRadius: '8px',
+          zIndex: 1000,
+          fontWeight: 500
+        }}>
+          {toast}
         </div>
-        <h1 style={{ fontSize: '52px', fontWeight: 900, color: '#fff', marginBottom: '8px' }}>{result.slots.length} slots found</h1>
-        <p style={{ color: '#8B8FA8', fontSize: '16px' }}>We found the optimal windows for your project sync.</p>
+      )}
+
+      {/* Page Header */}
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        marginBottom: '32px'
+      }}>
+        <div>
+          <h1 style={{ 
+            fontSize: '28px', 
+            fontWeight: 700, 
+            marginBottom: '8px' 
+          }}>
+            Best Slots for {result.candidateName || 'Candidate'}
+          </h1>
+          <p style={{ 
+            color: '#9ca3af', 
+            fontSize: '16px' 
+          }}>
+            Found {result.slots.length} matching time slots
+          </p>
+        </div>
+        <button
+          onClick={() => setScreen('input')}
+          style={{
+            padding: '10px 20px',
+            background: '#6c63ff',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontSize: '14px',
+            fontWeight: 600
+          }}
+        >
+          Back
+        </button>
       </div>
 
       {/* Slot Cards */}
-      {result.slots.map((slot, idx) => (
-        <div key={idx} style={{
-          background: '#1A1D27', borderRadius: '20px', padding: '24px 28px',
-          marginBottom: '16px', cursor: 'pointer',
-          border: idx === 0 ? '1px solid rgba(196,192,255,0.2)' : '1px solid rgba(255,255,255,0.04)',
-          boxShadow: idx === 0 ? '0 0 40px rgba(108,99,255,0.15)' : 'none',
-          opacity: idx === 2 ? 0.7 : 1,
-          animation: idx === 0 ? 'borderGlow 3s ease-in-out infinite' : 'none',
-          transition: 'transform 0.2s, box-shadow 0.2s',
-          position: 'relative'
-        }}
-        onMouseOver={e => e.currentTarget.style.transform = 'translateY(-4px)'}
-        onMouseOut={e => e.currentTarget.style.transform = 'translateY(0)'}>
-
-          {idx === 0 && (
-            <div style={{
-              position: 'absolute', top: '-12px', left: '24px',
-              background: '#00E5A0', color: '#003824', fontSize: '11px', fontWeight: 800,
-              padding: '4px 12px', borderRadius: '999px', letterSpacing: '0.5px'
-            }}>✦ BEST MATCH</div>
-          )}
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <div style={{ fontSize: '22px', fontWeight: 800, color: idx === 2 ? '#8B8FA8' : '#fff', marginBottom: '4px' }}>
-                {slot.dateLabel}
+      <div style={{ 
+        display: 'grid', 
+        gap: '20px',
+        marginBottom: '32px'
+      }}>
+        {result.slots.map((slot, index) => {
+          const quality = getMatchQuality(slot.score || 75);
+          return (
+            <div key={index} style={{
+              background: '#1f2937',
+              borderRadius: '16px',
+              padding: '24px',
+              border: '1px solid #374151',
+              position: 'relative'
+            }}>
+              {/* Slot Number Badge */}
+              <div style={{
+                position: 'absolute',
+                top: '-12px',
+                left: '24px',
+                background: '#6c63ff',
+                color: '#fff',
+                padding: '8px 16px',
+                borderRadius: '20px',
+                fontSize: '14px',
+                fontWeight: 700
+              }}>
+                Slot {index + 1}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '18px', fontWeight: 700, color: idx === 2 ? '#6B6B9F' : '#6C63FF' }}>
-                  {slot.startTime} — {slot.endTime}
-                </span>
-              </div>
-              <div style={{ fontSize: '13px', color: '#8B8FA8', marginTop: '6px', fontStyle: 'italic' }}>
-                {slot.reason}
-              </div>
-            </div>
 
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <div style={{ display: 'flex' }}>
-                {slot.availableInterviewers.map((name, i) => (
-                  <div key={i} style={{
-                    width: '32px', height: '32px', borderRadius: '50%',
-                    background: AVATAR_COLORS[i % AVATAR_COLORS.length],
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color: '#fff', fontSize: '11px', fontWeight: 700,
-                    marginLeft: i > 0 ? '-8px' : '0',
-                    border: '2px solid #1A1D27', zIndex: slot.availableInterviewers.length - i
-                  }}>{name[0].toUpperCase()}</div>
-                ))}
-                {slot.missingInterviewers.map((name, i) => (
-                  <div key={`missing-${i}`} style={{
-                    width: '32px', height: '32px', borderRadius: '50%',
-                    background: '#2A2D3E', display: 'flex', alignItems: 'center',
-                    justifyContent: 'center', color: '#555', fontSize: '11px', fontWeight: 700,
-                    marginLeft: '-8px', border: '2px solid #1A1D27',
-                    textDecoration: 'line-through', opacity: 0.4
-                  }}>{name[0].toUpperCase()}</div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <ProgressBar percent={slot.participationPercent} />
-        </div>
-      ))}
-
-      {/* Conflict Details */}
-      {result.conflictReport?.hasConflicts && (
-        <div style={{ marginTop: '24px', background: '#1A1D27', borderRadius: '16px', overflow: 'hidden' }}>
-          <button onClick={() => setConflictOpen(!conflictOpen)} style={{
-            width: '100%', padding: '18px 24px', background: 'none', border: 'none',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            cursor: 'pointer', color: '#e2e2eb'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span style={{ fontSize: '18px' }}>⚠️</span>
-              <span style={{ fontWeight: 600, fontSize: '15px' }}>Conflict Details ({result.conflictReport.conflicts.length})</span>
-            </div>
-            <span style={{ transform: conflictOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.3s', fontSize: '16px', color: '#8B8FA8' }}>∨</span>
-          </button>
-
-          {conflictOpen && (
-            <div style={{ padding: '0 16px 16px' }}>
-              {result.conflictReport.conflicts.map((c, i) => (
-                <div key={i} style={{
-                  background: '#111319', borderRadius: '12px', padding: '14px 16px',
-                  marginBottom: '8px', display: 'flex', alignItems: 'flex-start', gap: '12px'
-                }}>
-                  <div style={{
-                    width: '36px', height: '36px', borderRadius: '10px', flexShrink: 0,
-                    background: 'rgba(255,107,53,0.15)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px'
-                  }}>⚠️</div>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '14px', color: '#e2e2eb', marginBottom: '4px' }}>{c.name}</div>
-                    <div style={{ fontSize: '13px', color: '#8B8FA8' }}>{c.reason}</div>
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: '1fr auto',
+                gap: '24px',
+                alignItems: 'center'
+              }}>
+                <div>
+                  <div style={{ 
+                    fontSize: '20px', 
+                    fontWeight: 600,
+                    marginBottom: '8px',
+                    color: '#fff'
+                  }}>
+                    {formatDate(slot.date)}
+                  </div>
+                  <div style={{ 
+                    fontSize: '18px',
+                    color: '#9ca3af',
+                    marginBottom: '12px'
+                  }}>
+                    {formatTime(slot.startTime)} - {formatTime(slot.endTime)}
+                  </div>
+                  <div style={{ 
+                    display: 'flex',
+                    gap: '16px',
+                    fontSize: '14px',
+                    color: '#9ca3af'
+                  }}>
+                    <div>
+                      <strong>Candidate:</strong> {slot.candidateName || 'N/A'}
+                    </div>
+                    <div>
+                      <strong>Interviewer:</strong> {slot.interviewerName || 'N/A'}
+                    </div>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
-      {/* Buttons */}
-      <div style={{ textAlign: 'center', marginTop: '40px' }}>
-        <button onClick={() => setShowModal(true)} style={{
-          padding: '16px 48px', borderRadius: '999px', border: 'none',
-          background: 'linear-gradient(135deg, #6C63FF, #8B87FF)', color: '#fff',
-          fontSize: '16px', fontWeight: 700, cursor: 'pointer',
-          boxShadow: '0 8px 32px rgba(108,99,255,0.35)', transition: 'all 0.2s'
-        }}
-        onMouseOver={e => e.target.style.transform = 'translateY(-2px)'}
-        onMouseOut={e => e.target.style.transform = 'translateY(0)'}>
-          Confirm Best Match
-        </button>
-        <div>
-          <button onClick={() => setScreen('input')} style={{
-            marginTop: '12px', background: 'none', border: 'none',
-            color: '#8B8FA8', fontSize: '14px', cursor: 'pointer', textDecoration: 'underline'
-          }}>Regenerate options</button>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{
+                    background: quality.color + '22',
+                    color: quality.color,
+                    padding: '8px 16px',
+                    borderRadius: '12px',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    marginBottom: '16px'
+                  }}>
+                    {quality.text}
+                  </div>
+                  <div style={{ 
+                    fontSize: '24px', 
+                    fontWeight: 700,
+                    color: quality.color,
+                    marginBottom: '4px'
+                  }}>
+                    {slot.score || 75}%
+                  </div>
+                  <div style={{ 
+                    fontSize: '12px',
+                    color: '#9ca3af'
+                  }}>
+                    Match Score
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => handleBookSlot(slot)}
+                style={{
+                  width: '100%',
+                  padding: '12px 24px',
+                  background: '#6c63ff',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '15px',
+                  fontWeight: 600,
+                  marginTop: '16px',
+                  transition: 'all 0.2s'
+                }}
+              >
+                Book This Slot
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* All Availability Table */}
+      <div style={{
+        background: '#1f2937',
+        borderRadius: '12px',
+        padding: '24px',
+        border: '1px solid #374151'
+      }}>
+        <h3 style={{ 
+          fontSize: '18px', 
+          fontWeight: 600,
+          marginBottom: '16px',
+          color: '#fff'
+        }}>
+          All Availability
+        </h3>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #374151' }}>
+                <th style={{ padding: '12px', textAlign: 'left', color: '#9ca3af', fontSize: '12px', textTransform: 'uppercase' }}>Name</th>
+                <th style={{ padding: '12px', textAlign: 'left', color: '#9ca3af', fontSize: '12px', textTransform: 'uppercase' }}>Role</th>
+                <th style={{ padding: '12px', textAlign: 'left', color: '#9ca3af', fontSize: '12px', textTransform: 'uppercase' }}>Date</th>
+                <th style={{ padding: '12px', textAlign: 'left', color: '#9ca3af', fontSize: '12px', textTransform: 'uppercase' }}>Time</th>
+                <th style={{ padding: '12px', textAlign: 'left', color: '#9ca3af', fontSize: '12px', textTransform: 'uppercase' }}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.slots.map((slot, index) => (
+                <tr key={index} style={{ borderBottom: '1px solid #374151' }}>
+                  <td style={{ padding: '12px', color: '#e5e7eb' }}>
+                    {slot.candidateName || slot.interviewerName || 'N/A'}
+                  </td>
+                  <td style={{ padding: '12px' }}>
+                    <span style={{
+                      background: '#6c63ff22',
+                      color: '#6c63ff',
+                      padding: '4px 8px',
+                      borderRadius: '12px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      textTransform: 'capitalize'
+                    }}>
+                      {slot.candidateName ? 'Candidate' : 'Interviewer'}
+                    </span>
+                  </td>
+                  <td style={{ padding: '12px', color: '#e5e7eb' }}>
+                    {formatDate(slot.date)}
+                  </td>
+                  <td style={{ padding: '12px', color: '#e5e7eb' }}>
+                    {formatTime(slot.startTime)} - {formatTime(slot.endTime)}
+                  </td>
+                  <td style={{ padding: '12px' }}>
+                    <button
+                      onClick={() => handleBookSlot(slot)}
+                      style={{
+                        padding: '6px 12px',
+                        background: '#10b981',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        fontWeight: 600
+                      }}
+                    >
+                      Book
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      {showModal && (
-        <ConfirmModal 
-          sessionId={sessionId} 
-          selectedSlot={bestSlot}
-          onClose={() => setShowModal(false)}
-          onSuccess={() => setScreen('history')}
-        />
-      )}
+      {/* Confirm Modal */}
+      {modal && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0,0,0,0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: '20px'
+        }}>
+          <div style={{
+            background: '#1f2937',
+            borderRadius: '16px',
+            padding: '32px',
+            width: '100%',
+            maxWidth: '480px',
+            border: '1px solid #374151'
+          }}>
+            <h2 style={{ 
+              marginBottom: '8px',
+              fontSize: '20px',
+              color: '#fff'
+            }}>
+              Confirm Interview Booking
+            </h2>
+            <p style={{ 
+              color: '#9ca3af', 
+              marginBottom: '24px',
+              fontSize: '14px'
+            }}>
+              for {modal.candidateName || 'Candidate'} on {formatDate(modal.date)}
+            </p>
 
-      <style>{`
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes borderGlow {
-          0%, 100% { box-shadow: 0 0 20px rgba(108,99,255,0.15); }
-          50% { box-shadow: 0 0 40px rgba(108,99,255,0.35); }
-        }
-      `}</style>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ 
+                display: 'block',
+                marginBottom: '6px',
+                fontSize: '13px',
+                color: '#9ca3af',
+                fontWeight: 500
+              }}>
+                Interview Date
+              </label>
+              <input
+                type="date"
+                value={confirmForm.interviewDate}
+                onChange={e => setConfirmForm(prev => ({ ...prev, interviewDate: e.target.value }))}
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  border: '1px solid #374151',
+                  background: '#111827',
+                  color: '#fff',
+                  fontSize: '14px',
+                  boxSizing: 'border-box',
+                  colorScheme: 'dark'
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ 
+                display: 'block',
+                marginBottom: '6px',
+                fontSize: '13px',
+                color: '#9ca3af',
+                fontWeight: 500
+              }}>
+                Interview Time
+              </label>
+              <input
+                type="time"
+                value={confirmForm.interviewTime}
+                onChange={e => setConfirmForm(prev => ({ ...prev, interviewTime: e.target.value }))}
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  border: '1px solid #374151',
+                  background: '#111827',
+                  color: '#fff',
+                  fontSize: '14px',
+                  boxSizing: 'border-box',
+                  colorScheme: 'dark'
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{ 
+                display: 'block',
+                marginBottom: '6px',
+                fontSize: '13px',
+                color: '#9ca3af',
+                fontWeight: 500
+              }}>
+                Meeting Link
+              </label>
+              <input
+                type="url"
+                placeholder="https://meet.google.com/..."
+                value={confirmForm.meetingLink}
+                onChange={e => setConfirmForm(prev => ({ ...prev, meetingLink: e.target.value }))}
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  border: '1px solid #374151',
+                  background: '#111827',
+                  color: '#fff',
+                  fontSize: '14px',
+                  boxSizing: 'border-box',
+                  colorScheme: 'dark'
+                }}
+              />
+            </div>
+
+            <div style={{ 
+              display: 'flex', 
+              gap: '12px'
+            }}>
+              <button
+                onClick={handleConfirmBooking}
+                disabled={loading}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  background: loading ? '#4c4685' : '#6c63ff',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  fontSize: '15px',
+                  fontWeight: 600,
+                  opacity: loading ? 0.7 : 1
+                }}
+              >
+                {loading ? 'Confirming...' : 'Confirm & Send Emails'}
+              </button>
+              <button
+                onClick={() => setModal(null)}
+                style={{
+                  padding: '12px 20px',
+                  background: 'transparent',
+                  color: '#9ca3af',
+                  border: '1px solid #374151',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '15px'
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

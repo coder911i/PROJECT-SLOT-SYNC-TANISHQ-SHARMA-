@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const db = require('./db');
+const { findBestSlots } = require('./scheduler');
 const { 
   sendCandidateEmail,
   sendManagerEmail,
@@ -352,7 +353,65 @@ app.get('/api/automations/daily-reminders',
   }
 });
 
-// ROUTE 8 — History:
+// ROUTE 8 — Find best slots:
+app.post('/api/slots/find', (req, res) => {
+  try {
+    const { candidateEmail } = req.body;
+
+    if (!candidateEmail) {
+      return res.status(400).json({ 
+        error: 'candidateEmail required' 
+      });
+    }
+
+    // Get candidate availability
+    const candidateSlots = db.prepare(`
+      SELECT * FROM availability 
+      WHERE personEmail = ? 
+      AND role = 'candidate'
+    `).all(candidateEmail);
+
+    // Get ALL interviewer availability
+    const interviewerSlots = db.prepare(`
+      SELECT * FROM availability 
+      WHERE role = 'interviewer'
+    `).all();
+
+    if (candidateSlots.length === 0) {
+      return res.json({ 
+        slots: [],
+        message: 'No availability found for this candidate'
+      });
+    }
+
+    if (interviewerSlots.length === 0) {
+      return res.json({ 
+        slots: [],
+        message: 'No interviewer availability found'
+      });
+    }
+
+    const bestSlots = findBestSlots(
+      candidateSlots, 
+      interviewerSlots, 
+      3
+    );
+
+    return res.json({ 
+      slots: bestSlots,
+      candidateEmail,
+      total: bestSlots.length
+    });
+
+  } catch (err) {
+    console.error('Find slots error:', err.message);
+    return res.status(500).json({ 
+      error: err.message 
+    });
+  }
+});
+
+// ROUTE 9 — History:
 app.get('/api/history', (req, res) => {
   try {
     const history = db.prepare(`
